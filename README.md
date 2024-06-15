@@ -29,9 +29,15 @@ OpenCBM GUI is a graphical user interface for the OpenCBM software, which allows
     cd opencbm-gui
     ```
 
-3. Run the PowerShell script:
+3. Adjust PowerShell execution policy (if not already set):
     ```sh
-    .\OpenCBM_GUI.ps1
+    Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+    ```
+    Note: You may need to run PowerShell as an administrator to change the execution policy.
+
+4. Run the PowerShell script:
+    ```sh
+    .\opencbmGUI.ps1
     ```
 
 ## Usage
@@ -59,6 +65,22 @@ OpenCBM GUI is a graphical user interface for the OpenCBM software, which allows
     - Enter the disk name and disk ID.
     - Check the "Verify" and "Use cbmforng" options if needed.
     - Click the "Format Disk" button to format the disk with the specified options.
+
+## Creating an Icon for the Application
+
+To create an icon for the OpenCBM GUI application:
+
+1. Create a shortcut for the PowerShell script:
+    - Right-click on the `opencbmGUI.ps1` file.
+    - Select "Create shortcut".
+
+2. Change the icon of the shortcut:
+    - Right-click on the created shortcut and select "Properties".
+    - Go to the "Shortcut" tab and click on "Change Icon...".
+    - Choose an icon file (`.ico`) from your computer or use a default one from Windows.
+    - Click "OK" and then "Apply".
+
+3. (Optional) Move the shortcut to a convenient location, like the Desktop or Start Menu.
 
 ## Example Commands
 
@@ -95,4 +117,3 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 ---
 
 *OpenCBM GUI v0.1 by dotBtty*
-
