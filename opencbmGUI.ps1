@@ -313,35 +313,6 @@ $importButton.Add_Click({
 })
 $form.Controls.Add($importButton)
 
-# Function to handle drag-and-drop file import
-$form.AllowDrop = $true
-$form.Add_DragEnter({
-    param([System.Windows.Forms.DragEventArgs]$e)
-    if ($e.Data.GetDataPresent([System.Windows.Forms.DataFormats]::FileDrop)) {
-        $e.Effect = [System.Windows.Forms.DragDropEffects]::Copy
-    } else {
-        $e.Effect = [System.Windows.Forms.DragDropEffects]::None
-    }
-})
-
-$form.Add_DragDrop({
-    param([System.Windows.Forms.DragEventArgs]$e)
-    $files = $e.Data.GetData([System.Windows.Forms.DataFormats]::FileDrop)
-    if ($files) {
-        $fileNames = $files -join ", "
-        $result = [System.Windows.Forms.MessageBox]::Show("Do you want to import these files? `n$fileNames", "Import Files", [System.Windows.Forms.MessageBoxButtons]::YesNo)
-        if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
-            foreach ($filePath in $files) {
-                $deviceID = GetSelectedDeviceID
-                $command = "`"$rootPath\cbmcopy`" -w $deviceID `"$filePath`""
-                $statusLabel.Text = "Status: Importing $filePath..."
-                $output = RunCommand -command $command
-                UpdateStatus -command $command -status "File imported" -result $output
-            }
-        }
-    }
-})
-
 # Function to update status and last run command
 function UpdateStatus {
     param (
@@ -447,11 +418,11 @@ function ParseDirectoryOutput {
     )
     $lines = $output -split "`n"
     $title = [regex]::Match($lines[0], '".*?"').Value.Trim('"')
-    $freeBlocks = ($lines[-3] -split ' ')[0].Trim()
+    $freeBlocks = ($lines[-2] -split ' ')[0].Trim()
     $entries = @()
 
     for ($i = 1; $i -lt $lines.Length - 2; $i++) {
-        if ($lines[$i] -match '^\s*(\d+)\s+"(.+?)"\s+(prg|seq|rel|usr|del)') {
+        if ($lines[$i] -match '^\s*(\d+)\s+"(.+?)"\*?\s*(prg|seq|rel|usr|del)') {
             $entries += [PSCustomObject]@{
                 Size = $matches[1]
                 Filename = $matches[2]
