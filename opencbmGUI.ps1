@@ -1,10 +1,5 @@
-#OpenCBMGUI by dotBtty v0.3
+#OpenCBMGUI by dotBtty
 #See https://github.com/tonnyrh/OpenCBMGUI
-
-#################################################################################################################################################
-#OpenCBM GUI is a graphical user interface for the OpenCBM software, which allows users to interact with Commodore disk drives.                 #
-#This GUI is built using PowerShell and Windows Forms, providing an intuitive way to manage disk operations without using the command line.     #
-#################################################################################################################################################
 
 # Import the necessary assembly for Windows Forms
 Add-Type -AssemblyName System.Windows.Forms
@@ -27,7 +22,7 @@ function Debug-Output {
 
 # Create a new form
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "OpenCBM GUI v0.3 by dotBtty"
+$form.Text = "OpenCBM GUI v0.32 by dotBtty"
 $form.Size = New-Object System.Drawing.Size(1200, 900)  # Increase the size of the form
 $form.StartPosition = "CenterScreen"
 
@@ -216,14 +211,14 @@ $radioButtons = @{}
 
 # Create a text box for the last run command
 $lastRunLabel = New-Object System.Windows.Forms.Label
-$lastRunLabel.Location = New-Object System.Drawing.Point(10, 700)
+$lastRunLabel.Location = New-Object System.Drawing.Point(10, 120)
 $lastRunLabel.Size = New-Object System.Drawing.Size(100, 20)
 $lastRunLabel.Text = "Last Run:"
 $lastRunLabel.Font = $font
 $form.Controls.Add($lastRunLabel)
 
 $lastRunTextBox = New-Object System.Windows.Forms.TextBox
-$lastRunTextBox.Location = New-Object System.Drawing.Point(120, 700)
+$lastRunTextBox.Location = New-Object System.Drawing.Point(120, 120)
 $lastRunTextBox.Size = New-Object System.Drawing.Size(650, 20)
 $lastRunTextBox.ReadOnly = $true
 $lastRunTextBox.Font = $font
@@ -231,20 +226,19 @@ $form.Controls.Add($lastRunTextBox)
 
 # Create a text box for the last result
 $lastResultLabel = New-Object System.Windows.Forms.Label
-$lastResultLabel.Location = New-Object System.Drawing.Point(10, 730)
+$lastResultLabel.Location = New-Object System.Drawing.Point(10, 150)
 $lastResultLabel.Size = New-Object System.Drawing.Size(100, 20)
 $lastResultLabel.Text = "Last Result:"
 $lastResultLabel.Font = $font
 $form.Controls.Add($lastResultLabel)
 
 $lastResultTextBox = New-Object System.Windows.Forms.TextBox
-$lastResultTextBox.Location = New-Object System.Drawing.Point(120, 730)
+$lastResultTextBox.Location = New-Object System.Drawing.Point(120, 150)
 $lastResultTextBox.Size = New-Object System.Drawing.Size(650, 120)  # Increase height
 $lastResultTextBox.Multiline = $true
 $lastResultTextBox.ReadOnly = $true
 $lastResultTextBox.ScrollBars = "Vertical"  # Add scroll bars to handle long output
 $lastResultTextBox.WordWrap = $false  # Disable word wrap to handle formatted output
-$lastResultTextBox.Font = $font
 $form.Controls.Add($lastResultTextBox)
 
 # Create the DataGridView for directory output
@@ -255,6 +249,8 @@ $directoryGrid.ReadOnly = $true
 $directoryGrid.AllowUserToAddRows = $false
 $directoryGrid.AllowUserToDeleteRows = $false
 $directoryGrid.AllowUserToOrderColumns = $true
+$directoryGrid.SelectionMode = [System.Windows.Forms.DataGridViewSelectionMode]::FullRowSelect
+$directoryGrid.MultiSelect = $true  # Enable multi-selection
 $form.Controls.Add($directoryGrid)
 
 # Add labels for the disk title and blocks free above the DataGridView
@@ -269,6 +265,82 @@ $freeBlocksLabel.Location = New-Object System.Drawing.Point(800, 100)
 $freeBlocksLabel.Size = New-Object System.Drawing.Size(370, 20)
 $freeBlocksLabel.Font = $font
 $form.Controls.Add($freeBlocksLabel)
+
+# Add the export button
+$exportButton = New-Object System.Windows.Forms.Button
+$exportButton.Location = New-Object System.Drawing.Point(500, 300)
+$exportButton.Size = New-Object System.Drawing.Size(250, 30)
+$exportButton.Text = "Export Selected Files"
+$exportButton.Font = $font
+$exportButton.Add_Click({
+    $folderBrowserDialog = New-Object System.Windows.Forms.FolderBrowserDialog
+    if ($folderBrowserDialog.ShowDialog() -eq "OK") {
+        $destinationFolder = $folderBrowserDialog.SelectedPath
+        $selectedFiles = $directoryGrid.SelectedRows | ForEach-Object {
+            $_.Cells["Filename"].Value
+        }
+        foreach ($file in $selectedFiles) {
+            $deviceID = GetSelectedDeviceID
+            $command = "`"$rootPath\cbmcopy`" -r $deviceID `"$file`" -o `"$destinationFolder\$file`""
+            $statusLabel.Text = "Status: Exporting $file..."
+            $output = RunCommand -command $command
+            UpdateStatus -command $command -status "File exported" -result $output
+        }
+    }
+})
+$form.Controls.Add($exportButton)
+
+# Add the import button
+$importButton = New-Object System.Windows.Forms.Button
+$importButton.Location = New-Object System.Drawing.Point(500, 340)
+$importButton.Size = New-Object System.Drawing.Size(250, 30)
+$importButton.Text = "Import Files"
+$importButton.Font = $font
+$importButton.Add_Click({
+    $openFileDialog = New-Object System.Windows.Forms.OpenFileDialog
+    $openFileDialog.Multiselect = $true
+    $openFileDialog.Filter = "Raw, PC64 (P00) and T64 files (*.prg;*.p00;*.t64;*.bin)|*.prg;*.p00;*.t64;*.bin|All files (*.*)|*.*"
+    if ($openFileDialog.ShowDialog() -eq "OK") {
+        $filePaths = $openFileDialog.FileNames
+        foreach ($filePath in $filePaths) {
+            $deviceID = GetSelectedDeviceID
+            $command = "`"$rootPath\cbmcopy`" -w $deviceID `"$filePath`""
+            $statusLabel.Text = "Status: Importing $filePath..."
+            $output = RunCommand -command $command
+            UpdateStatus -command $command -status "File imported" -result $output
+        }
+    }
+})
+$form.Controls.Add($importButton)
+
+# Function to handle drag-and-drop file import
+$form.AllowDrop = $true
+$form.Add_DragEnter({
+    param([System.Windows.Forms.DragEventArgs]$e)
+    if ($e.Data.GetDataPresent([System.Windows.Forms.DataFormats]::FileDrop)) {
+        $e.Effect = [System.Windows.Forms.DragDropEffects]::Copy
+    } else {
+        $e.Effect = [System.Windows.Forms.DragDropEffects]::None
+    }
+})
+
+$form.Add_DragDrop({
+    param([System.Windows.Forms.DragEventArgs]$e)
+    $files = $e.Data.GetData([System.Windows.Forms.DataFormats]::FileDrop)
+    if ($files) {
+        $fileNames = $files -join ", "
+        $result = [System.Windows.Forms.MessageBox]::Show("Do you want to import these files? `n$fileNames", "Import Files", [System.Windows.Forms.MessageBoxButtons]::YesNo)
+        if ($result -eq [System.Windows.Forms.DialogResult]::Yes) {
+            foreach ($filePath in $files) {
+                $deviceID = GetSelectedDeviceID
+                $command = "`"$rootPath\cbmcopy`" -w $deviceID `"$filePath`""
+                $statusLabel.Text = "Status: Importing $filePath..."
+                $output = RunCommand -command $command
+                UpdateStatus -command $command -status "File imported" -result $output
+            }
+        }
+    }
+})
 
 # Function to update status and last run command
 function UpdateStatus {
@@ -375,7 +447,7 @@ function ParseDirectoryOutput {
     )
     $lines = $output -split "`n"
     $title = [regex]::Match($lines[0], '".*?"').Value.Trim('"')
-    $freeBlocks = ($lines[-2] -split ',')[0].Trim()
+    $freeBlocks = ($lines[-3] -split ' ')[0].Trim()
     $entries = @()
 
     for ($i = 1; $i -lt $lines.Length - 2; $i++) {
