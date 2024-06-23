@@ -1,5 +1,5 @@
-#OpenCBMGUI by dotBtty
-#See https://github.com/tonnyrh/OpenCBMGUI
+# OpenCBMGUI by dotBtty
+# See https://github.com/tonnyrh/OpenCBMGUI
 
 # Import the necessary assembly for Windows Forms
 Add-Type -AssemblyName System.Windows.Forms
@@ -22,7 +22,7 @@ function Debug-Output {
 
 # Create a new form
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "OpenCBM GUI v0.32 by dotBtty"
+$form.Text = "OpenCBM GUI v0.39 by dotBtty"
 $form.Size = New-Object System.Drawing.Size(1200, 900)  # Increase the size of the form
 $form.StartPosition = "CenterScreen"
 
@@ -102,62 +102,77 @@ $transferFromDriveMenuItem.Add_Click({
     $copyMethod = $copyMethodComboBox.SelectedItem
     $saveFileDialog = New-Object System.Windows.Forms.SaveFileDialog
 
-    # Set file dialog filter based on selected copy method
-    switch ($copyMethod) {
-        "d64copy" { $saveFileDialog.Filter = "D64 files (*.d64)|*.d64" }
-        "d82copy" { $saveFileDialog.Filter = "D80 and D82 files (*.d80;*.d82)|*.d80;*.d82" }
-        "imgcopy" { $saveFileDialog.Filter = "Image files (*.d64;*.d71;*.d80;*.d81;*.d82)|*.d64;*.d71;*.d80;*.d81;*.d82" }
-        "cbmcopy" { $saveFileDialog.Filter = "Raw binary files (*.bin)|*.bin|All files (*.*)|*.*" }
-    }
+    if ($copyMethod -eq "cbmcopy") {
+        # Open a dialog to get the Commodore file name and the destination file name
+        $fileSelectionForm = New-Object System.Windows.Forms.Form
+        $fileSelectionForm.Text = "Select Commodore File"
+        $fileSelectionForm.Size = New-Object System.Drawing.Size(400, 300)
+        $fileSelectionForm.StartPosition = "CenterParent"
 
-    $fileSelectionForm = New-Object System.Windows.Forms.Form
-    $fileSelectionForm.Text = "Select Commodore File"
-    $fileSelectionForm.Size = New-Object System.Drawing.Size(400, 300)
-    $fileSelectionForm.StartPosition = "CenterParent"
+        $commodoreFileLabel = New-Object System.Windows.Forms.Label
+        $commodoreFileLabel.Location = New-Object System.Drawing.Point(10, 20)
+        $commodoreFileLabel.Size = New-Object System.Drawing.Size(360, 20)
+        $commodoreFileLabel.Text = "Enter the filename on the Commodore drive:"
+        $commodoreFileLabel.Font = $font
+        $fileSelectionForm.Controls.Add($commodoreFileLabel)
 
-    $commodoreFileLabel = New-Object System.Windows.Forms.Label
-    $commodoreFileLabel.Location = New-Object System.Drawing.Point(10, 20)
-    $commodoreFileLabel.Size = New-Object System.Drawing.Size(360, 20)
-    $commodoreFileLabel.Text = "Enter the filename on the Commodore drive:"
-    $commodoreFileLabel.Font = $font
-    $fileSelectionForm.Controls.Add($commodoreFileLabel)
+        $commodoreFileTextBox = New-Object System.Windows.Forms.TextBox
+        $commodoreFileTextBox.Location = New-Object System.Drawing.Point(10, 50)
+        $commodoreFileTextBox.Size = New-Object System.Drawing.Size(360, 20)
+        $commodoreFileTextBox.Font = $font
+        $fileSelectionForm.Controls.Add($commodoreFileTextBox)
 
-    $commodoreFileTextBox = New-Object System.Windows.Forms.TextBox
-    $commodoreFileTextBox.Location = New-Object System.Drawing.Point(10, 50)
-    $commodoreFileTextBox.Size = New-Object System.Drawing.Size(360, 20)
-    $commodoreFileTextBox.Font = $font
-    $fileSelectionForm.Controls.Add($commodoreFileTextBox)
-
-    $fileSelectionButton = New-Object System.Windows.Forms.Button
-    $fileSelectionButton.Location = New-Object System.Drawing.Point(10, 80)
-    $fileSelectionButton.Size = New-Object System.Drawing.Size(360, 30)
-    $fileSelectionButton.Text = "Select Destination File"
-    $fileSelectionButton.Font = $font
-    $fileSelectionButton.Add_Click({
-        if ($commodoreFileTextBox.Text -ne "") {
-            if ($saveFileDialog.ShowDialog() -eq "OK") {
-                $destinationFilePath = $saveFileDialog.FileName
-                $fileSelectionForm.Tag = @{
-                    CommodoreFile = $commodoreFileTextBox.Text
-                    DestinationFile = $destinationFilePath
+        $fileSelectionButton = New-Object System.Windows.Forms.Button
+        $fileSelectionButton.Location = New-Object System.Drawing.Point(10, 80)
+        $fileSelectionButton.Size = New-Object System.Drawing.Size(360, 30)
+        $fileSelectionButton.Text = "Select Destination File"
+        $fileSelectionButton.Font = $font
+        $fileSelectionButton.Add_Click({
+            if ($commodoreFileTextBox.Text -ne "") {
+                if ($saveFileDialog.ShowDialog() -eq "OK") {
+                    $destinationFilePath = $saveFileDialog.FileName
+                    $fileSelectionForm.Tag = @{
+                        CommodoreFile = $commodoreFileTextBox.Text
+                        DestinationFile = $destinationFilePath
+                    }
+                    $fileSelectionForm.Close()
                 }
-                $fileSelectionForm.Close()
+            } else {
+                [System.Windows.Forms.MessageBox]::Show("Please enter the Commodore file name.", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
             }
-        } else {
-            [System.Windows.Forms.MessageBox]::Show("Please enter the Commodore file name.", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+        })
+        $fileSelectionForm.Controls.Add($fileSelectionButton)
+
+        $fileSelectionForm.ShowDialog()
+
+        if ($fileSelectionForm.Tag -ne $null) {
+            $commodoreFile = $fileSelectionForm.Tag.CommodoreFile
+            $destinationFile = $fileSelectionForm.Tag.DestinationFile
+            $command = "`"$rootPath\cbmcopy`" -r $deviceID `"$commodoreFile`" -o `"$destinationFile`""
+            $statusLabel.Text = "Status: Transferring from drive..."
+            $output = RunCommand -command $command
+            UpdateStatus -command $command -status "File transferred from drive" -result $output
         }
-    })
-    $fileSelectionForm.Controls.Add($fileSelectionButton)
+    } else {
+        # For other copy methods, just open a save file dialog
+        switch ($copyMethod) {
+            "d64copy" { $saveFileDialog.Filter = "D64 files (*.d64)|*.d64" }
+            "d82copy" { $saveFileDialog.Filter = "D80 and D82 files (*.d80;*.d82)|*.d80;*.d82" }
+            "imgcopy" { $saveFileDialog.Filter = "Image files (*.d64;*.d71;*.d80;*.d81;*.d82)|*.d64;*.d71;*.d80;*.d81;*.d82" }
+            "cbmcopy" { $saveFileDialog.Filter = "Raw binary files (*.bin)|*.bin|All files (*.*)|*.*" }
+        }
 
-    $fileSelectionForm.ShowDialog()
-
-    if ($fileSelectionForm.Tag -ne $null) {
-        $commodoreFile = $fileSelectionForm.Tag.CommodoreFile
-        $destinationFile = $fileSelectionForm.Tag.DestinationFile
-        $command = "`"$rootPath\cbmcopy`" -r $deviceID `"$commodoreFile`" -o `"$destinationFile`""
-        $statusLabel.Text = "Status: Transferring from drive..."
-        $output = RunCommand -command $command
-        UpdateStatus -command $command -status "File transferred from drive" -result $output
+        if ($saveFileDialog.ShowDialog() -eq "OK") {
+            $filePath = $saveFileDialog.FileName
+            $command = switch ($copyMethod) {
+                "d64copy" { "`"$rootPath\d64copy`" $deviceID `"$filePath`"" }
+                "d82copy" { "`"$rootPath\d82copy`" $deviceID `"$filePath`"" }
+                "imgcopy" { "`"$rootPath\imgcopy`" $deviceID `"$filePath`"" }
+            }
+            $statusLabel.Text = "Status: Transferring from drive..."
+            $output = RunCommand -command $command
+            UpdateStatus -command $command -status "File transferred from drive" -result $output
+        }
     }
 })
 $fileMenu.DropDownItems.Add($transferFromDriveMenuItem)
