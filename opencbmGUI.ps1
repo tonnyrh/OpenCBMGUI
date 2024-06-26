@@ -4,12 +4,236 @@
 # Import the necessary assembly for Windows Forms
 Add-Type -AssemblyName System.Windows.Forms
 
+# Import the OpenCBMGUI module
+# Import-Module -Name "$PSScriptRoot\OpenCBMGUI.psm1"
+
 # Define the root path for OpenCBM
 $rootPath = "C:\Program Files\opencbm"  # Using a fixed path for clarity
 
 # Define a debug flag
 $debug = $false
 
+
+# Function to create and show an input box dialog for renaming a file
+function Show-InputBox {
+    param (
+        [string]$title,
+        [string]$promptText,
+        [string]$defaultValue
+    )
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = $title
+    $form.Size = New-Object System.Drawing.Size(400, 150)
+    $form.StartPosition = "CenterParent"
+
+    $label = New-Object System.Windows.Forms.Label
+    $label.Text = $promptText
+    $label.Size = New-Object System.Drawing.Size(360, 20)
+    $label.Location = New-Object System.Drawing.Point(10, 10)
+    $form.Controls.Add($label)
+
+    $textBox = New-Object System.Windows.Forms.TextBox
+    $textBox.Text = $defaultValue
+    $textBox.Size = New-Object System.Drawing.Size(360, 20)
+    $textBox.Location = New-Object System.Drawing.Point(10, 40)
+    $form.Controls.Add($textBox)
+
+    $okButton = New-Object System.Windows.Forms.Button
+    $okButton.Text = "OK"
+    $okButton.Size = New-Object System.Drawing.Size(75, 30)
+    $okButton.Location = New-Object System.Drawing.Point(295, 70)
+    $okButton.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $form.Controls.Add($okButton)
+
+    $cancelButton = New-Object System.Windows.Forms.Button
+    $cancelButton.Text = "Cancel"
+    $cancelButton.Size = New-Object System.Drawing.Size(75, 30)
+    $cancelButton.Location = New-Object System.Drawing.Point(210, 70)
+    $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $form.Controls.Add($cancelButton)
+
+    $form.AcceptButton = $okButton
+    $form.CancelButton = $cancelButton
+
+    $dialogResult = $form.ShowDialog()
+
+    if ($dialogResult -eq [System.Windows.Forms.DialogResult]::OK) {
+        return $textBox.Text
+    } else {
+        return $null
+    }
+}
+
+
+# Function to rename a file on the Commodore drive
+function Rename-File {
+    param (
+        [int]$deviceID,
+        [string]$oldFileName,
+        [string]$newFileName
+    )
+
+    $oldFileName=$oldFileName.ToUpper()
+    $newFileName=$newFileName.ToUpper()
+
+    $command = "`"$rootPath\cbmctrl`" command $deviceID `"R0:$newFileName=$oldFileName`""
+    $statusLabel.Text = "Status: Renaming file..."
+    $output = RunCommand -command $command
+    UpdateStatus -command $command -status "File renamed" -result $output
+}
+
+
+#Function to update status and last run command
+function UpdateStatus {
+    param (
+        [string]$command,
+        [string]$status,
+        [string]$result
+    )
+    $lastRunTextBox.Text = $command
+    $lastResultTextBox.Text = $result
+    $statusLabel.Text = "Status: " + $status
+    Add-LogEntry -command $command -result $result -status $status
+}
+
+# Function to add log entry
+function Add-LogEntry {
+    param (
+        [string]$command,
+        [string]$result,
+        [string]$status
+    )
+    $logEntry = [PSCustomObject]@{
+        Timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+        Command = $command
+        Result = $result
+        Status = $status
+    }
+    $logEntry | Export-Csv -Append -NoTypeInformation -Path "OpenCBMGUI.log"
+}
+
+# Function to run a command using cmd.exe
+function RunCommand {
+    param (
+        [string]$command
+    )
+    # Set up the file path
+    $tempFilePath = [System.IO.Path]::Combine($env:TEMP, "opencbmgui.tmp")
+
+    # Ensure the file is deleted if it exists
+    if (Test-Path $tempFilePath) {
+        Remove-Item $tempFilePath -Force
+    }
+
+    # Pipe the output of the command to the file, including errors
+    $cmd = "cmd.exe /c '$command' 2>&1 > '$tempFilePath'"
+    Invoke-Expression -Command $cmd
+
+    # Read the content of the file into the $output variable
+    $output = Get-Content $tempFilePath | Out-String
+
+    # Return the output
+    return $output
+}
+
+# Function to detect drive and select the corresponding radio button
+function DetectDrive {
+    $command = "`"$rootPath\cbmctrl`" detect"
+    $statusLabel.Text = "Status: Detecting..."
+    $output = RunCommand -command $command
+    UpdateStatus -command $command -status "Detected ID" -result $output # Update status with raw output for debugging
+    $detectedID = $null
+    try {
+        $output.Split("`n") | ForEach-Object {
+            Debug-Output "Processing line: '$_'" # Debug output
+            if ($_ -match " (\d{1,2}):") {
+                $detectedID = $matches[1].Trim()
+                Debug-Output "Detected ID: $detectedID" # Debug output
+                if ($radioButtons.ContainsKey([int]$detectedID)) {
+                    $radioButtons[[int]$detectedID].Checked = $true
+                }
+            }
+        }
+    }
+    catch {
+        UpdateStatus -command $command -status "Error detecting device ID." -result $output
+        Debug-Output "Error during detection: $_" # Debug output
+        return
+    }
+    if ($detectedID -eq $null) {
+        UpdateStatus -command $command -status "No valid device ID detected." -result $output
+        Debug-Output "No valid device ID detected." # Debug output
+    } else {
+        UpdateStatus -command $command -status "Detected id $($detectedID)" -result $output
+        Debug-Output "Final detected ID: $detectedID" # Debug output
+    }
+}
+
+#Function to get the selected device ID
+function GetSelectedDeviceID {
+    foreach ($id in $radioButtons.Keys) {
+        if ($radioButtons[$id].Checked) {
+            return $id
+        }
+    }
+}
+
+# Function to parse directory output
+function ParseDirectoryOutput {
+    param (
+        [string]$output
+    )
+    $lines = $output -split "`n"
+    $title = [regex]::Match($lines[0], '".*?"').Value.Trim('"')
+    $freeBlocks = ($lines[-2] -split ' ')[0].Trim()
+    $entries = @()
+
+    for ($i = 1; $i -lt $lines.Length - 2; $i++) {
+        if ($lines[$i] -match '^\s*(\d+)\s+"(.+?)"\*?\s*(prg|seq|rel|usr|del)') {
+            $entries += [PSCustomObject]@{
+                Size = $matches[1]
+                Filename = $matches[2]
+                Extension = $matches[3]
+            }
+        }
+    }
+
+    return [PSCustomObject]@{
+        Title = $title
+        FreeBlocks = $freeBlocks
+        Entries = $entries
+    }
+}
+
+
+
+# Function to populate the directory DataGridView
+function PopulateDirectoryGrid {
+    param (
+        [string]$output
+    )
+
+    $parsedOutput = ParseDirectoryOutput -output $output
+
+    # Clear existing rows and columns
+    $directoryGrid.Rows.Clear()
+    $directoryGrid.Columns.Clear()
+
+    # Add columns
+    $directoryGrid.Columns.Add("Size", "Size")
+    $directoryGrid.Columns.Add("Filename", "Filename")
+    $directoryGrid.Columns.Add("Extension", "Extension")
+
+    # Add rows
+    foreach ($entry in $parsedOutput.Entries) {
+        $directoryGrid.Rows.Add($entry.Size, $entry.Filename, $entry.Extension)
+    }
+
+    # Update the title and free blocks labels
+    $diskTitleLabel.Text = "Disk Title: $($parsedOutput.Title)"
+    $freeBlocksLabel.Text = "Free Blocks: $($parsedOutput.FreeBlocks)"
+}
 # Function to print debug output if the debug flag is set
 function Debug-Output {
     param (
@@ -20,9 +244,12 @@ function Debug-Output {
     }
 }
 
+
+
+
 # Create a new form
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "OpenCBM GUI v0.39 by dotBtty"
+$form.Text = "OpenCBM GUI v0.4 by dotBtty"
 $form.Size = New-Object System.Drawing.Size(1200, 900)  # Increase the size of the form
 $form.StartPosition = "CenterScreen"
 
@@ -43,19 +270,6 @@ $menuStrip.Items.Add($actionMenu)
 # Create About menu
 $aboutMenu = New-Object System.Windows.Forms.ToolStripMenuItem("About")
 $menuStrip.Items.Add($aboutMenu)
-
-# Add Dir command to File menu
-$dirMenuItem = New-Object System.Windows.Forms.ToolStripMenuItem("Dir")
-$dirMenuItem.Add_Click({
-    $deviceID = GetSelectedDeviceID
-    $command = "`"$rootPath\cbmctrl`" dir $deviceID"
-    $statusLabel.Text = "Status: Retrieving directory..."
-    $output = RunCommand -command $command
-    Debug-Output $output
-    UpdateStatus -command $command -status "Directory retrieved" -result $output
-    PopulateDirectoryGrid -output $output
-})
-$fileMenu.DropDownItems.Add($dirMenuItem)
 
 # Add Copy Method to File menu
 $copyMethodLabel = New-Object System.Windows.Forms.ToolStripMenuItem("Copy Method")
@@ -328,157 +542,56 @@ $importButton.Add_Click({
 })
 $form.Controls.Add($importButton)
 
-# Function to update status and last run command
-function UpdateStatus {
-    param (
-        [string]$command,
-        [string]$status,
-        [string]$result
-    )
-    $lastRunTextBox.Text = $command
-    $lastResultTextBox.Text = $result
-    $statusLabel.Text = "Status: " + $status
-    Add-LogEntry -command $command -result $result -status $status
-}
 
-# Function to add log entry
-function Add-LogEntry {
-    param (
-        [string]$command,
-        [string]$result,
-        [string]$status
-    )
-    $logEntry = [PSCustomObject]@{
-        Timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-        Command = $command
-        Result = $result
-        Status = $status
-    }
-    $logEntry | Export-Csv -Append -NoTypeInformation -Path "OpenCBMGUI.log"
-}
-
-# Function to run a command using cmd.exe
-function RunCommand {
-    param (
-        [string]$command
-    )
-    # Set up the file path
-    $tempFilePath = [System.IO.Path]::Combine($env:TEMP, "opencbmgui.tmp")
-
-    # Ensure the file is deleted if it exists
-    if (Test-Path $tempFilePath) {
-        Remove-Item $tempFilePath -Force
-    }
-
-    # Pipe the output of the command to the file, including errors
-    $cmd = "cmd.exe /c '$command' 2>&1 > '$tempFilePath'"
-    Invoke-Expression -Command $cmd
-
-    # Read the content of the file into the $output variable
-    $output = Get-Content $tempFilePath | Out-String
-
-    # Return the output
-    return $output
-}
-
-# Function to detect drive and select the corresponding radio button
-function DetectDrive {
-    $command = "`"$rootPath\cbmctrl`" detect"
-    $statusLabel.Text = "Status: Detecting..."
+# Add the "Dir" button under the "Import" button
+$dirButton = New-Object System.Windows.Forms.Button
+$dirButton.Location = New-Object System.Drawing.Point(500, 380)  # Adjust the location as needed
+$dirButton.Size = New-Object System.Drawing.Size(250, 30)
+$dirButton.Text = "Dir"
+$dirButton.Font = $font
+$dirButton.Add_Click({
+    $deviceID = GetSelectedDeviceID
+    $command = "`"$rootPath\cbmctrl`" dir $deviceID"
+    $statusLabel.Text = "Status: Retrieving directory..."
     $output = RunCommand -command $command
-    UpdateStatus -command $command -status "Detected ID" -result $output # Update status with raw output for debugging
-    $detectedID = $null
-    try {
-        $output.Split("`n") | ForEach-Object {
-            Debug-Output "Processing line: '$_'" # Debug output
-            if ($_ -match " (\d{1,2}):") {
-                $detectedID = $matches[1].Trim()
-                Debug-Output "Detected ID: $detectedID" # Debug output
-                if ($radioButtons.ContainsKey([int]$detectedID)) {
-                    $radioButtons[[int]$detectedID].Checked = $true
-                }
-            }
-        }
-    }
-    catch {
-        UpdateStatus -command $command -status "Error detecting device ID." -result $output
-        Debug-Output "Error during detection: $_" # Debug output
+    Debug-Output $output
+    UpdateStatus -command $command -status "Directory retrieved" -result $output
+    PopulateDirectoryGrid -output $output
+})
+$form.Controls.Add($dirButton)
+
+# Add the "Rename" button under the "Dir" button
+$renameButton = New-Object System.Windows.Forms.Button
+$renameButton.Location = New-Object System.Drawing.Point(500, 420)  # Adjust the location as needed
+$renameButton.Size = New-Object System.Drawing.Size(250, 30)
+$renameButton.Text = "Rename"
+$renameButton.Font = $font
+$renameButton.Add_Click({
+    # Check if a file is selected in the DataGridView
+    if ($directoryGrid.SelectedRows.Count -eq 0) {
+        [System.Windows.Forms.MessageBox]::Show("Please select a file to rename.", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
         return
     }
-    if ($detectedID -eq $null) {
-        UpdateStatus -command $command -status "No valid device ID detected." -result $output
-        Debug-Output "No valid device ID detected." # Debug output
-    } else {
-        UpdateStatus -command $command -status "Detected id $($detectedID)" -result $output
-        Debug-Output "Final detected ID: $detectedID" # Debug output
+
+    # Get the selected file name
+    $selectedRow = $directoryGrid.SelectedRows[0]
+    $oldFileName = $selectedRow.Cells["Filename"].Value
+
+    # Prompt for the new file name
+    $newFileName = Show-InputBox -title "Rename File" -promptText "Enter new file name:" -defaultValue $oldFileName
+
+    # If the new file name is provided, execute the rename command
+    if ($newFileName -ne $null -and $newFileName.Trim() -ne "") {
+        $deviceID = GetSelectedDeviceID
+        Rename-File -deviceID $deviceID -oldFileName $oldFileName -newFileName $newFileName.Trim()
     }
-}
+})
+$form.Controls.Add($renameButton)
 
 # Run detect drive on startup
 DetectDrive
 
-# Function to get the selected device ID
-function GetSelectedDeviceID {
-    foreach ($id in $radioButtons.Keys) {
-        if ($radioButtons[$id].Checked) {
-            return $id
-        }
-    }
-}
-
-# Function to parse directory output
-function ParseDirectoryOutput {
-    param (
-        [string]$output
-    )
-    $lines = $output -split "`n"
-    $title = [regex]::Match($lines[0], '".*?"').Value.Trim('"')
-    $freeBlocks = ($lines[-2] -split ' ')[0].Trim()
-    $entries = @()
-
-    for ($i = 1; $i -lt $lines.Length - 2; $i++) {
-        if ($lines[$i] -match '^\s*(\d+)\s+"(.+?)"\*?\s*(prg|seq|rel|usr|del)') {
-            $entries += [PSCustomObject]@{
-                Size = $matches[1]
-                Filename = $matches[2]
-                Extension = $matches[3]
-            }
-        }
-    }
-
-    return [PSCustomObject]@{
-        Title = $title
-        FreeBlocks = $freeBlocks
-        Entries = $entries
-    }
-}
-
-# Function to populate the directory DataGridView
-function PopulateDirectoryGrid {
-    param (
-        [string]$output
-    )
-
-    $parsedOutput = ParseDirectoryOutput -output $output
-
-    # Clear existing rows and columns
-    $directoryGrid.Rows.Clear()
-    $directoryGrid.Columns.Clear()
-
-    # Add columns
-    $directoryGrid.Columns.Add("Size", "Size")
-    $directoryGrid.Columns.Add("Filename", "Filename")
-    $directoryGrid.Columns.Add("Extension", "Extension")
-
-    # Add rows
-    foreach ($entry in $parsedOutput.Entries) {
-        $directoryGrid.Rows.Add($entry.Size, $entry.Filename, $entry.Extension)
-    }
-
-    # Update the title and free blocks labels
-    $diskTitleLabel.Text = "Disk Title: $($parsedOutput.Title)"
-    $freeBlocksLabel.Text = "Free Blocks: $($parsedOutput.FreeBlocks)"
-}
+# 
 
 # Create Action menu items
 $initDriveMenuItem = New-Object System.Windows.Forms.ToolStripMenuItem("Initialize Drive")
@@ -535,7 +648,7 @@ $formatDiskMenuItem.Add_Click({
     $diskNameTextBox = New-Object System.Windows.Forms.TextBox
     $diskNameTextBox.Location = New-Object System.Drawing.Point(120, 20)
     $diskNameTextBox.Size = New-Object System.Drawing.Size(150, 20)
-    $diskNameTextBox.Text = "NEWDISK" # Default disk name
+    $diskNameTextBox.Text = "empty" # Default disk name
     $diskNameTextBox.Font = $font
     $formatForm.Controls.Add($diskNameTextBox)
 
