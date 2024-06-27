@@ -1,4 +1,5 @@
 # OpenCBMGUI by dotBtty
+$Version="0.5"
 # See https://github.com/tonnyrh/OpenCBMGUI
 
 # Import the necessary assembly for Windows Forms
@@ -12,6 +13,46 @@ $rootPath = "C:\Program Files\opencbm"  # Using a fixed path for clarity
 
 # Define a debug flag
 $debug = $false
+
+# Function to retrieve the directory and populate the Directory grid
+function RetrieveAndPopulateDirectory {
+    param (
+        [int]$deviceID,
+        [switch]$DisableStatusUpdate
+    )
+
+    $command = "`"$rootPath\cbmctrl`" dir $deviceID"
+    if (-not $DisableStatusUpdate) {
+        $statusLabel.Text = "Status: Retrieving directory..."
+    }
+    $output = RunCommand -command $command
+    Debug-Output $output
+
+    if (-not $DisableStatusUpdate) {
+        UpdateStatus -command $command -status "Directory retrieved" -result $output
+    }
+
+    PopulateDirectoryGrid -output $output
+}
+
+
+
+# Function to delete a file on the Commodore drive
+function Delete-File {
+    param (
+        [int]$deviceID,
+        [string]$fileName
+    )
+
+    $fileName = $fileName.ToUpper()  # Convert the file name to uppercase
+
+
+    $command = "`"$rootPath\cbmctrl`" command $deviceID `"S0:$fileName`""
+    $statusLabel.Text = "Status: Deleting file..."
+    $output = RunCommand -command $command
+    UpdateStatus -command $command -status "File deleted" -result $output
+}
+
 
 
 # Function to create and show an input box dialog for renaming a file
@@ -179,17 +220,19 @@ function GetSelectedDeviceID {
     }
 }
 
-# Function to parse directory output
+# Update the ParseDirectoryOutput function to include "Free Bytes"
 function ParseDirectoryOutput {
     param (
         [string]$output
     )
     $lines = $output -split "`n"
     $title = [regex]::Match($lines[0], '".*?"').Value.Trim('"')
-    $freeBlocks = ($lines[-2] -split ' ')[0].Trim()
+    $freeBlocks = ($lines[-3] -split ' ')[0].Trim()
+    $blockSize = 256
+    $freeBytes = [int]$freeBlocks * $blockSize
     $entries = @()
 
-    for ($i = 1; $i -lt $lines.Length - 2; $i++) {
+    for ($i = 1; $i -lt $lines.Length - 3; $i++) {
         if ($lines[$i] -match '^\s*(\d+)\s+"(.+?)"\*?\s*(prg|seq|rel|usr|del)') {
             $entries += [PSCustomObject]@{
                 Size = $matches[1]
@@ -202,13 +245,12 @@ function ParseDirectoryOutput {
     return [PSCustomObject]@{
         Title = $title
         FreeBlocks = $freeBlocks
+        FreeBytes = $freeBytes
         Entries = $entries
     }
 }
 
-
-
-# Function to populate the directory DataGridView
+# Update the PopulateDirectoryGrid function to display "Free Bytes"
 function PopulateDirectoryGrid {
     param (
         [string]$output
@@ -221,7 +263,7 @@ function PopulateDirectoryGrid {
     $directoryGrid.Columns.Clear()
 
     # Add columns
-    $directoryGrid.Columns.Add("Size", "Size")
+    $directoryGrid.Columns.Add("Size", "SizeBlocks")
     $directoryGrid.Columns.Add("Filename", "Filename")
     $directoryGrid.Columns.Add("Extension", "Extension")
 
@@ -230,10 +272,14 @@ function PopulateDirectoryGrid {
         $directoryGrid.Rows.Add($entry.Size, $entry.Filename, $entry.Extension)
     }
 
-    # Update the title and free blocks labels
+    # Update the title, free blocks, and free bytes labels
     $diskTitleLabel.Text = "Disk Title: $($parsedOutput.Title)"
     $freeBlocksLabel.Text = "Free Blocks: $($parsedOutput.FreeBlocks)"
+    $freeBytesLabel.Text = "Free Bytes: $($parsedOutput.FreeBytes)"
 }
+
+
+
 # Function to print debug output if the debug flag is set
 function Debug-Output {
     param (
@@ -249,7 +295,7 @@ function Debug-Output {
 
 # Create a new form
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "OpenCBM GUI v0.4 by dotBtty"
+$form.Text = "OpenCBM GUI $($Version) by dotBtty"
 $form.Size = New-Object System.Drawing.Size(1200, 900)  # Increase the size of the form
 $form.StartPosition = "CenterScreen"
 
@@ -472,8 +518,8 @@ $form.Controls.Add($lastResultTextBox)
 
 # Create the DataGridView for directory output
 $directoryGrid = New-Object System.Windows.Forms.DataGridView
-$directoryGrid.Location = New-Object System.Drawing.Point(800, 140)
-$directoryGrid.Size = New-Object System.Drawing.Size(370, 710)
+$directoryGrid.Location = New-Object System.Drawing.Point(800, 160)
+$directoryGrid.Size = New-Object System.Drawing.Size(370, 650)
 $directoryGrid.ReadOnly = $true
 $directoryGrid.AllowUserToAddRows = $false
 $directoryGrid.AllowUserToDeleteRows = $false
@@ -495,6 +541,16 @@ $freeBlocksLabel.Size = New-Object System.Drawing.Size(370, 20)
 $freeBlocksLabel.Font = $font
 $form.Controls.Add($freeBlocksLabel)
 
+# Add a label for Free Bytes to the form
+$freeBytesLabel = New-Object System.Windows.Forms.Label
+$freeBytesLabel.Location = New-Object System.Drawing.Point(800, 130)  # Adjust the location as needed
+$freeBytesLabel.Size = New-Object System.Drawing.Size(370, 20)
+$freeBytesLabel.Font = $font
+$form.Controls.Add($freeBytesLabel)
+
+
+
+
 # Add the export button
 $exportButton = New-Object System.Windows.Forms.Button
 $exportButton.Location = New-Object System.Drawing.Point(500, 300)
@@ -514,6 +570,7 @@ $exportButton.Add_Click({
             $statusLabel.Text = "Status: Exporting $file..."
             $output = RunCommand -command $command
             UpdateStatus -command $command -status "File exported" -result $output
+            RetrieveAndPopulateDirectory -deviceID $deviceID -DisableStatusUpdate
         }
     }
 })
@@ -536,7 +593,15 @@ $importButton.Add_Click({
             $command = "`"$rootPath\cbmcopy`" -w $deviceID `"$filePath`""
             $statusLabel.Text = "Status: Importing $filePath..."
             $output = RunCommand -command $command
-            UpdateStatus -command $command -status "File imported" -result $output
+            
+            # Check if output contains "writing" to determine success
+            if ($output -match "writing") {
+                UpdateStatus -command $command -status "File imported" -result $output
+            } else {
+                UpdateStatus -command $command -status "File import failed" -result $output
+            }
+
+            RetrieveAndPopulateDirectory -deviceID $deviceID -DisableStatusUpdate
         }
     }
 })
@@ -551,14 +616,11 @@ $dirButton.Text = "Dir"
 $dirButton.Font = $font
 $dirButton.Add_Click({
     $deviceID = GetSelectedDeviceID
-    $command = "`"$rootPath\cbmctrl`" dir $deviceID"
-    $statusLabel.Text = "Status: Retrieving directory..."
-    $output = RunCommand -command $command
-    Debug-Output $output
-    UpdateStatus -command $command -status "Directory retrieved" -result $output
-    PopulateDirectoryGrid -output $output
+    RetrieveAndPopulateDirectory -deviceID $deviceID
 })
 $form.Controls.Add($dirButton)
+
+
 
 # Add the "Rename" button under the "Dir" button
 $renameButton = New-Object System.Windows.Forms.Button
@@ -584,9 +646,45 @@ $renameButton.Add_Click({
     if ($newFileName -ne $null -and $newFileName.Trim() -ne "") {
         $deviceID = GetSelectedDeviceID
         Rename-File -deviceID $deviceID -oldFileName $oldFileName -newFileName $newFileName.Trim()
+        RetrieveAndPopulateDirectory -deviceID $deviceID -DisableStatusUpdate
     }
 })
 $form.Controls.Add($renameButton)
+
+# Add the "Delete" button under the "Rename" button
+$deleteButton = New-Object System.Windows.Forms.Button
+$deleteButton.Location = New-Object System.Drawing.Point(500, 460)  # Adjust the location as needed
+$deleteButton.Size = New-Object System.Drawing.Size(250, 30)
+$deleteButton.Text = "Delete"
+$deleteButton.Font = $font
+$deleteButton.Add_Click({
+    # Check if a file is selected in the DataGridView
+    if ($directoryGrid.SelectedRows.Count -eq 0) {
+        [System.Windows.Forms.MessageBox]::Show("Please select a file to delete.", "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+        return
+    }
+
+    # Get the selected file name
+    $selectedRow = $directoryGrid.SelectedRows[0]
+    $fileName = $selectedRow.Cells["Filename"].Value
+
+    # Confirm deletion
+    $confirmResult = [System.Windows.Forms.MessageBox]::Show("Are you sure you want to delete '$fileName'?", "Confirm Delete", [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
+    
+    if ($confirmResult -eq [System.Windows.Forms.DialogResult]::Yes) {
+        # Execute the delete command
+        $deviceID = GetSelectedDeviceID
+        Delete-File -deviceID $deviceID -fileName $fileName
+        RetrieveAndPopulateDirectory -deviceID $deviceID -DisableStatusUpdate
+    }
+})
+$form.Controls.Add($deleteButton)
+
+
+
+
+
+
 
 # Run detect drive on startup
 DetectDrive
@@ -716,4 +814,6 @@ $actionMenu.DropDownItems.Add($formatDiskMenuItem)
 
 # Show the form
 $form.Add_Shown({$form.Activate()})
+# Show Directory
+RetrieveAndPopulateDirectory -deviceID $deviceID -DisableStatusUpdate
 [void]$form.ShowDialog()
