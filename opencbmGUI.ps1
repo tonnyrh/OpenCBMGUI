@@ -447,7 +447,7 @@ $fileMenu.DropDownItems.Add($exitMenuItem)
 # Add About option
 $aboutMenuItem = New-Object System.Windows.Forms.ToolStripMenuItem("About OpenCBM GUI")
 $aboutMenuItem.Add_Click({
-    [System.Windows.Forms.MessageBox]::Show("OpenCBM GUI v0.3 by dotBtty`nSee https://github.com/tonnyrh/OpenCBMGUI", "About", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+    [System.Windows.Forms.MessageBox]::Show("OpenCBM GUI $($version) by dotBtty`nSee https://github.com/tonnyrh/OpenCBMGUI", "About", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
 })
 $aboutMenu.DropDownItems.Add($aboutMenuItem)
 
